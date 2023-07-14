@@ -57,38 +57,19 @@ jobs:
     permissions: write-all
     runs-on: ubuntu-latest
     steps:
-
       - name: Checkout code
         uses: actions/checkout@v3
-
       - name: Get the version
         id: get_version
         run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
-        # run: echo "VERSION=${{GITHUB_REF/refs\/tags\//}}" >> $GITHUB_STATE
-
       - name: Create Release Branch
         run: git checkout -b release-${{ steps.get_version.outputs.VERSION }}
-
-      # - name: Push the branch 
-      #   env:
-      #     GIT_USER_NAME: ${{ secrets.GIT_USER_NAME }}
-      #     GIT_USER_EMAIL: ${{ secrets.GIT_USER_EMAIL }}
-      #   run: |
-      #     git config user.name "${GIT_USER_NAME}"
-      #     git config user.email "${GIT_USER_EMAIL}"
-      #     git push https://ilyamolokov:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/ilyamolokovOrganization/ci-task.git release-${{ steps.get_version.outputs.VERSION }}
-
       - name: Generate changelog
         uses: scottbrenner/generate-changelog-action@master
         id: changelog
         with:
           from-tag: 'last tag'
           to-tag: 'current tag'
-        # run: |
-        #   LAST_TAG=$(git describe --tags --abbrev=0 HEAD^)
-        #   CHANGELOG=$(git log --pretty=format:"- %s" $LAST_TAG..HEAD)
-        #   echo ::set-output name=changelog::$CHANGELOG
-
       - name: Find Release Issue
         id: find_issue
         run: |
@@ -97,7 +78,6 @@ jobs:
             jq -r ".[] | select(.title == \"Release ${{ steps.get_version.outputs.VERSION }}\") | .number")
           echo ::set-output name=issue_number::$ISSUE_NUMBER
         shell: bash
-
       - name: Update Release Issue
         if: steps.find_issue.outputs.issue_number
         uses: octokit/request-action@v2.x
@@ -111,8 +91,6 @@ jobs:
             Changelog: ${{ steps.changelog.outputs.changelog }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-...
       - name: Create Release Issue
         id: create_release
         if: steps.find_issue.outputs.issue_number == ''
