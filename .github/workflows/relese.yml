@@ -1,0 +1,146 @@
+on:
+  push:
+    tags:
+      - 'v[0-9]+'
+
+name: Create Release
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x]
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Run tests ${{ matrix.node-version }}
+        uses: actions/setup-node@v2 
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install commitlint
+        run: |
+          npm install conventional-changelog-conventionalcommits
+          npm install commitlint@latest
+
+      - name: Validate current commit (last commit) with commitlint
+        if: github.event_name == 'push'
+        run: npx commitlint --from HEAD~1 --to HEAD --verbose
+
+      - name: Validate PR commits with commitlint
+        if: github.event_name == 'pull_request'
+        run: npx commitlint --from ${{ github.event.pull_request.head.sha }}~${{ github.event.pull_request.commits }} --to ${{ github.event.pull_request.head.sha }} --verbose
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Run build
+        run: npm run build --if-present
+
+      - name: Run Unit test
+        run: npm run test
+
+      - name: Run e2e test
+        run: npm run e2e
+
+      - name: Run test-ci
+        run: npm run test-ci
+
+  release:
+    permissions: write-all
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Get the version
+        id: get_version
+        run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
+        # run: echo "VERSION=${{GITHUB_REF/refs\/tags\//}}" >> $GITHUB_STATE
+
+      - name: Create Release Branch
+        run: git checkout -b release-${{ steps.get_version.outputs.VERSION }}
+
+      # - name: Push the branch 
+      #   env:
+      #     GIT_USER_NAME: ${{ secrets.GIT_USER_NAME }}
+      #     GIT_USER_EMAIL: ${{ secrets.GIT_USER_EMAIL }}
+      #   run: |
+      #     git config user.name "${GIT_USER_NAME}"
+      #     git config user.email "${GIT_USER_EMAIL}"
+      #     git push https://ilyamolokov:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/ilyamolokovOrganization/ci-task.git release-${{ steps.get_version.outputs.VERSION }}
+
+      - name: Generate changelog
+        uses: scottbrenner/generate-changelog-action@master
+        id: changelog
+        with:
+          from-tag: 'last tag'
+          to-tag: 'current tag'
+        # run: |
+        #   LAST_TAG=$(git describe --tags --abbrev=0 HEAD^)
+        #   CHANGELOG=$(git log --pretty=format:"- %s" $LAST_TAG..HEAD)
+        #   echo ::set-output name=changelog::$CHANGELOG
+
+      - name: Find Release Issue
+        id: find_issue
+        run: |
+          ISSUE_NUMBER=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues?labels=RELEASE" | \
+            jq -r ".[] | select(.title == \"Release ${{ steps.get_version.outputs.VERSION }}\") | .number")
+          echo ::set-output name=issue_number::$ISSUE_NUMBER
+        shell: bash
+
+      - name: Update Release Issue
+        if: steps.find_issue.outputs.issue_number
+        uses: octokit/request-action@v2.x
+        with:
+          route: PATCH /repos/{owner}/{repo}/issues/{issue_number}
+          title: 'Release ${{ steps.get_version.outputs.VERSION }}'
+          body: | 
+            Author: ${{ github.actor }}
+            Date: ${{ github.event.commits[0].timestamp }}
+            Version: ${{ steps.get_version.outputs.VERSION }}
+            Changelog: ${{ steps.changelog.outputs.changelog }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+...
+      - name: Create Release Issue
+        id: create_release
+        if: steps.find_issue.outputs.issue_number == ''
+        uses: actions/create-release@latest
+        with:
+          tag_name: ${{ steps.get_version.outputs.VERSION }}
+          release_name: 'Release ${{ steps.get_version.outputs.VERSION }}'
+          body: | 
+            Author: ${{ github.actor }}
+            Date: ${{ github.event.commits[0].timestamp }}
+            Version: ${{ steps.get_version.outputs.VERSION }}
+            Changelog: ${{ steps.changelog.outputs.changelog }}
+          draft: false
+          prerelease: false
+          labels: RELEASE
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+      - name: Close Release Issue
+        run: gh issue close "Release ${{ steps.get_version.outputs.VERSION }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # - name: Close Release Issue
+      #   uses: octokit/request-action@v2.x
+      #   with:
+      #     route: PATCH /repos/{owner}/{repo}/issues/{issue_number}
+      #     state: closed
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
