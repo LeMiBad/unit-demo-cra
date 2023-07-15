@@ -108,17 +108,7 @@ jobs:
           labels: RELEASE
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-
       - name: Close Release Issue
-        run: gh issue close "Release ${{ steps.get_version.outputs.VERSION }}"
+        run: gh issue close ${{ steps.find_issue.outputs.issue_number }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # - name: Close Release Issue
-      #   uses: octokit/request-action@v2.x
-      #   with:
-      #     route: PATCH /repos/{owner}/{repo}/issues/{issue_number}
-      #     state: closed
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
